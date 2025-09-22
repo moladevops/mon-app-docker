@@ -1,8 +1,47 @@
-# ... (garde le début identique)
+name: Docker CI Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  docker-build-test-push:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Login to Docker Hub
+      if: github.event_name == 'push'
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+      
+    - name: Build Docker image
+      run: docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/mon-app:${{ github.sha }} .
+      
+    - name: Test container starts
+      run: |
+        docker run -d -p 8080:80 --name test-container ${{ secrets.DOCKERHUB_USERNAME }}/mon-app:${{ github.sha }}
+        sleep 5
+        curl -f http://localhost:8080 || exit 1
+        docker stop test-container
+
     - name: Run security scan
       uses: aquasecurity/trivy-action@master
       with:
-        image-ref: 'mon-app:test'
+        image-ref: '${{ secrets.DOCKERHUB_USERNAME }}/mon-app:${{ github.sha }}'
         format: 'table'
         exit-code: '1'
         severity: 'CRITICAL'
+
+    - name: Push to Docker Hub
+      if: github.event_name == 'push'
+      run: |
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/mon-app:${{ github.sha }}
+        docker tag ${{ secrets.DOCKERHUB_USERNAME }}/mon-app:${{ github.sha }} ${{ secrets.DOCKERHUB_USERNAME }}/mon-app:latest
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/mon-app:latest
